@@ -1,6 +1,6 @@
-# Web-Tools
+# Web-Tools (GUI Version)
 (notice : the tool is vibecoded)
-#Setup & Usage Guide
+# Setup & Usage Guide
 
 ## 📋 Features
 
