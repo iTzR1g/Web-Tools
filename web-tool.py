@@ -80,6 +80,10 @@ import base64
 import hmac
 import hashlib
 
+# Import security modules (inline since they're part of same tool)
+import subprocess
+import tempfile
+
 
 class ToolConfig:
     """Configuration and settings"""
@@ -588,12 +592,242 @@ class EncryptionModule:
             raise Exception(f"Fernet decode error: {str(e)}")
 
 
+
+
+class VulnerabilityDetector:
+    """Detect XSS, SQLi, and other vulnerabilities"""
+    
+    # XSS patterns
+    XSS_PATTERNS = [
+        r'<script[^>]*>.*?</script>',
+        r'javascript:',
+        r'on\w+\s*=\s*["\']?[^"\']*["\']?',
+        r'<iframe[^>]*>',
+        r'<object[^>]*>',
+        r'<embed[^>]*>',
+        r'<img[^>]*on\w+',
+        r'eval\s*\(',
+        r'expression\s*\(',
+        r'vbscript:',
+    ]
+    
+    # SQLi patterns
+    SQLI_PATTERNS = [
+        r"(\bunion\b.*\bselect\b)",
+        r"(\bor\b\s*['\"]\s*[=<>])",
+        r"(\band\b\s*['\"]\s*[=<>])",
+        r"(--|#|;\s*--)",
+        r"(\bexec\b|\bexecute\b)",
+        r"(\bcast\b|\bconvert\b)",
+        r"(\bunion\s+all\s+select\b)",
+        r"(sleep\s*\(\d+\))",
+        r"(load_file\s*\()",
+    ]
+    
+    @staticmethod
+    def detect_xss(data):
+        """Detect XSS vulnerabilities"""
+        vulnerabilities = []
+        if isinstance(data, str):
+            for pattern in VulnerabilityDetector.XSS_PATTERNS:
+                if re.search(pattern, data, re.IGNORECASE):
+                    vulnerabilities.append({
+                        "type": "XSS",
+                        "severity": "HIGH",
+                        "match": re.search(pattern, data, re.IGNORECASE).group(0)
+                    })
+        return vulnerabilities
+    
+    @staticmethod
+    def detect_sqli(data):
+        """Detect SQL Injection vulnerabilities"""
+        vulnerabilities = []
+        if isinstance(data, str):
+            for pattern in VulnerabilityDetector.SQLI_PATTERNS:
+                if re.search(pattern, data, re.IGNORECASE):
+                    vulnerabilities.append({
+                        "type": "SQLi",
+                        "severity": "CRITICAL",
+                        "match": re.search(pattern, data, re.IGNORECASE).group(0)
+                    })
+        return vulnerabilities
+    
+    @staticmethod
+    def scan_url(url):
+        """Scan URL for vulnerabilities"""
+        vulnerabilities = []
+        xss = VulnerabilityDetector.detect_xss(url)
+        sqli = VulnerabilityDetector.detect_sqli(url)
+        return xss + sqli
+    
+    @staticmethod
+    def scan_body(body):
+        """Scan request body"""
+        vulnerabilities = []
+        xss = VulnerabilityDetector.detect_xss(body)
+        sqli = VulnerabilityDetector.detect_sqli(body)
+        return xss + sqli
+    
+    @staticmethod
+    def generate_report(vulnerabilities):
+        """Generate vulnerability report"""
+        if not vulnerabilities:
+            return {"status": "SECURE", "vulnerabilities": []}
+        
+        critical = [v for v in vulnerabilities if v.get("severity") == "CRITICAL"]
+        high = [v for v in vulnerabilities if v.get("severity") == "HIGH"]
+        
+        return {
+            "status": "VULNERABLE" if critical else "WARNING" if high else "INFO",
+            "summary": {
+                "critical": len(critical),
+                "high": len(high),
+                "total": len(vulnerabilities)
+            },
+            "vulnerabilities": vulnerabilities
+        }
+
+
+class RequestInterceptor:
+    """Analyze HTTP requests/responses like Burp Suite"""
+    
+    @staticmethod
+    def analyze_request(method, url, headers, body):
+        """Analyze HTTP request"""
+        url_vulns = VulnerabilityDetector.scan_url(url)
+        body_vulns = VulnerabilityDetector.scan_body(body) if body else []
+        
+        return {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body[:300] if body else "",
+            "url_vulnerabilities": url_vulns,
+            "body_vulnerabilities": body_vulns
+        }
+    
+    @staticmethod
+    def extract_scripts(html):
+        """Extract JavaScript from HTML"""
+        scripts = []
+        
+        # Inline scripts
+        pattern = r'<script[^>]*>(.*?)</script>'
+        matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
+        for i, script in enumerate(matches):
+            scripts.append({"type": "inline", "index": i, "content": script[:200]})
+        
+        # External scripts
+        pattern = r'<script[^>]*src=["\']([^"\']+)["\']'
+        matches = re.findall(pattern, html, re.IGNORECASE)
+        for i, src in enumerate(matches):
+            scripts.append({"type": "external", "index": i, "src": src})
+        
+        return scripts
+    
+    @staticmethod
+    def check_security_headers(headers):
+        """Check for security headers"""
+        important = {
+            "X-Content-Type-Options": "MIME-sniffing",
+            "X-Frame-Options": "Clickjacking",
+            "X-XSS-Protection": "XSS Protection",
+            "Strict-Transport-Security": "HTTPS Enforcement"
+        }
+        
+        missing = []
+        present = []
+        
+        for header, desc in important.items():
+            if header in headers:
+                present.append(f"✅ {header}")
+            else:
+                missing.append(f"❌ {header} ({desc})")
+        
+        return {"present": present, "missing": missing}
+
+
+class SQLMapIntegration:
+    """SQLMap integration for SQL injection testing"""
+    
+    @staticmethod
+    def check_installed():
+        """Check if sqlmap is installed"""
+        try:
+            subprocess.run(['sqlmap', '--version'], capture_output=True, timeout=5)
+            return True
+        except:
+            return False
+    
+    @staticmethod
+    def generate_payloads():
+        """Generate SQL injection payloads"""
+        return [
+            "' OR '1'='1",
+            "' OR 1=1--",
+            "admin' --",
+            "' UNION SELECT NULL--",
+            "1' ORDER BY 1--",
+            "' AND SLEEP(5)--",
+            "'; DROP TABLE users--",
+            "' OR 1=1/*",
+        ]
+
+
+class SQLViewer:
+    """SQL Database viewer"""
+    
+    @staticmethod
+    def connect(db_path):
+        """Connect to database"""
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            return {"status": "connected", "tables": tables, "connection": (conn, cursor)}
+        except Exception as e:
+            raise Exception(f"Connection error: {str(e)}")
+    
+    @staticmethod
+    def get_table_data(cursor, table_name):
+        """Get table data"""
+        try:
+            cursor.execute(f"SELECT * FROM {table_name} LIMIT 100")
+            rows = cursor.fetchall()
+            
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cursor.fetchone()[0]
+            
+            # Get column names
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            return {"columns": columns, "data": rows, "count": count}
+        except Exception as e:
+            raise Exception(f"Query error: {str(e)}")
+    
+    @staticmethod
+    def execute_query(cursor, query):
+        """Execute custom query"""
+        try:
+            cursor.execute(query)
+            if query.strip().upper().startswith('SELECT'):
+                return {"type": "SELECT", "data": cursor.fetchall()}
+            else:
+                return {"type": "MODIFY", "affected": cursor.rowcount}
+        except Exception as e:
+            raise Exception(f"Query error: {str(e)}")
+
+
 class MainApp(tk.Tk):
     """Main Application Window"""
     
     def __init__(self):
         super().__init__()
-        self.title("🛠️  Web Tools")
+        self.title("🛠️  Professional Python Tool Suite")
         self.geometry(f"{ToolConfig.WINDOW_WIDTH}x{ToolConfig.WINDOW_HEIGHT}")
         self.configure(bg=ToolConfig.BG_COLOR)
         self.style_setup()
@@ -626,6 +860,9 @@ class MainApp(tk.Tk):
         self.create_api_tester_tab()
         self.create_file_converter_tab()
         self.create_encryption_tab()
+        self.create_security_scanner_tab()
+        self.create_sql_viewer_tab()
+        self.create_request_interceptor_tab()
         
         output_frame = ttk.LabelFrame(self, text="📊 Output & Logs", padding=10)
         output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -1011,6 +1248,326 @@ class MainApp(tk.Tk):
         ttk.Button(button_frame, text="🔒 Encrypt", command=encrypt_action).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="🔓 Decrypt", command=decrypt_action).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="📋 Copy Output", command=copy_output).pack(side=tk.LEFT, padx=5)
+    
+    def create_security_scanner_tab(self):
+        """Security Vulnerability Scanner Tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🛡️  Security Scanner")
+        
+        # Input area
+        ttk.Label(frame, text="URL to Scan:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        url_entry = ttk.Entry(frame, width=80)
+        url_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        url_entry.insert(0, "https://example.com?id=1")
+        
+        ttk.Label(frame, text="Request Body (JSON):", font=("Arial", 9, "bold")).grid(row=1, column=0, padx=10, pady=10, sticky="nw")
+        body_text = tk.Text(frame, height=6, bg="#2d2d2d", fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        body_text.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        body_text.insert(1.0, '{"username": "admin", "password": "test123"}')
+        
+        # Scan buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+        
+        def scan_url():
+            try:
+                url = url_entry.get()
+                vulns = VulnerabilityDetector.scan_url(url)
+                report = VulnerabilityDetector.generate_report(vulns)
+                
+                self.logger.log("\n=== SECURITY SCAN REPORT ===", "INFO")
+                self.logger.log(f"Status: {report['status']}", "SUCCESS" if report['status'] == "SECURE" else "WARNING")
+                self.logger.log(f"Total Vulnerabilities: {report['summary']['total']}", "INFO")
+                self.logger.log(f"Critical: {report['summary']['critical']}", "ERROR" if report['summary']['critical'] > 0 else "INFO")
+                self.logger.log(f"High: {report['summary']['high']}", "WARNING" if report['summary']['high'] > 0 else "INFO")
+                
+                for vuln in report['vulnerabilities']:
+                    self.logger.log(f"\n[{vuln['type']}] {vuln['severity']}", "ERROR")
+                    self.logger.log(f"Match: {vuln['match']}", "INFO")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        def scan_body():
+            try:
+                body = body_text.get(1.0, tk.END)
+                vulns = VulnerabilityDetector.scan_body(body)
+                report = VulnerabilityDetector.generate_report(vulns)
+                
+                self.logger.log("\n=== BODY SCAN REPORT ===", "INFO")
+                self.logger.log(f"Status: {report['status']}", "SUCCESS" if report['status'] == "SECURE" else "WARNING")
+                self.logger.log(f"Total Vulnerabilities: {report['summary']['total']}", "INFO")
+                
+                for vuln in report['vulnerabilities']:
+                    self.logger.log(f"[{vuln['type']}] {vuln['severity']}: {vuln['match']}", "ERROR")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        def show_payloads():
+            payloads = SQLMapIntegration.generate_payloads()
+            self.logger.log("\n=== SQL INJECTION PAYLOADS ===", "INFO")
+            for i, payload in enumerate(payloads, 1):
+                self.logger.log(f"{i}. {payload}", "WARNING")
+        
+        ttk.Button(button_frame, text="🔍 Scan URL", command=scan_url).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="🔍 Scan Body", command=scan_body).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="💣 Show Payloads", command=show_payloads).pack(side=tk.LEFT, padx=5)
+        
+        frame.columnconfigure(1, weight=1)
+    
+    def create_sql_viewer_tab(self):
+        """SQL Database Viewer Tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="💾 SQL Viewer")
+        
+        # Database connection
+        conn_frame = ttk.LabelFrame(frame, text="Database Connection", padding=10)
+        conn_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(conn_frame, text="Database Path:").pack(side=tk.LEFT, padx=5)
+        db_path_entry = ttk.Entry(conn_frame, width=50)
+        db_path_entry.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(conn_frame, text="Tables:").pack(side=tk.LEFT, padx=15)
+        tables_var = tk.StringVar()
+        tables_combo = ttk.Combobox(conn_frame, textvariable=tables_var, state="readonly", width=20)
+        tables_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Data display
+        data_frame = ttk.LabelFrame(frame, text="Table Data", padding=10)
+        data_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        data_text = scrolledtext.ScrolledText(data_frame, height=15, bg="#2d2d2d", 
+                                             fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        data_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Query execution
+        query_frame = ttk.LabelFrame(frame, text="Execute Query", padding=10)
+        query_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        query_text = tk.Text(query_frame, height=4, bg="#2d2d2d", 
+                            fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        query_text.pack(fill=tk.BOTH, padx=5, pady=5)
+        query_text.insert(1.0, "SELECT * FROM table_name LIMIT 10;")
+        
+        db_connection = [None]  # Store connection
+        
+        def connect_db():
+            try:
+                db_path = db_path_entry.get()
+                if not db_path:
+                    self.logger.log("Please enter database path", "WARNING")
+                    return
+                
+                result = SQLViewer.connect(db_path)
+                db_connection[0] = result['connection']
+                
+                tables_combo['values'] = result['tables']
+                if result['tables']:
+                    tables_combo.current(0)
+                
+                self.logger.log(f"Connected to {db_path}", "SUCCESS")
+                self.logger.log(f"Tables found: {', '.join(result['tables'])}", "INFO")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        def load_table():
+            try:
+                if not db_connection[0]:
+                    self.logger.log("Not connected to database", "WARNING")
+                    return
+                
+                table = tables_var.get()
+                if not table:
+                    self.logger.log("Select a table", "WARNING")
+                    return
+                
+                cursor = db_connection[0][1]
+                result = SQLViewer.get_table_data(cursor, table)
+                
+                data_text.config(state=tk.NORMAL)
+                data_text.delete(1.0, tk.END)
+                
+                # Show columns
+                data_text.insert(tk.END, f"Columns: {', '.join(result['columns'])}\n")
+                data_text.insert(tk.END, f"Total rows: {result['count']}\n\n")
+                data_text.insert(tk.END, "=" * 80 + "\n")
+                
+                # Show data
+                for row in result['data'][:50]:
+                    data_text.insert(tk.END, str(row) + "\n")
+                
+                data_text.config(state=tk.DISABLED)
+                self.logger.log(f"Loaded table '{table}' ({result['count']} rows)", "SUCCESS")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        def execute_query():
+            try:
+                if not db_connection[0]:
+                    self.logger.log("Not connected to database", "WARNING")
+                    return
+                
+                query = query_text.get(1.0, tk.END).strip()
+                cursor = db_connection[0][1]
+                result = SQLViewer.execute_query(cursor, query)
+                
+                data_text.config(state=tk.NORMAL)
+                data_text.delete(1.0, tk.END)
+                
+                if result['type'] == 'SELECT':
+                    data_text.insert(tk.END, f"Returned {len(result['data'])} rows:\n\n")
+                    for row in result['data'][:50]:
+                        data_text.insert(tk.END, str(row) + "\n")
+                else:
+                    data_text.insert(tk.END, f"Query executed. Affected rows: {result['affected']}")
+                
+                data_text.config(state=tk.DISABLED)
+                self.logger.log("Query executed successfully", "SUCCESS")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        button_frame = ttk.Frame(conn_frame)
+        button_frame.pack(side=tk.LEFT, padx=20)
+        ttk.Button(button_frame, text="Connect", command=connect_db).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Load Table", command=load_table).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Execute", command=execute_query).pack(side=tk.LEFT, padx=5)
+    
+    def create_request_interceptor_tab(self):
+        """Request/Response Interceptor (Burp Suite-like) Tab"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🔬 Request Interceptor")
+        
+        # Request details
+        ttk.Label(frame, text="Method:").grid(row=0, column=0, padx=10, pady=10)
+        method_var = tk.StringVar(value="GET")
+        method_combo = ttk.Combobox(frame, textvariable=method_var, 
+                                    values=["GET", "POST", "PUT", "DELETE"], state="readonly", width=10)
+        method_combo.grid(row=0, column=1, padx=10, pady=10, sticky="w")
+        
+        ttk.Label(frame, text="URL:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        url_entry = ttk.Entry(frame, width=80)
+        url_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        url_entry.insert(0, "https://example.com")
+        
+        ttk.Label(frame, text="Headers:").grid(row=2, column=0, padx=10, pady=10, sticky="nw")
+        headers_text = tk.Text(frame, height=4, bg="#2d2d2d", fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        headers_text.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+        headers_text.insert(1.0, '{"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}')
+        
+        ttk.Label(frame, text="Response:").grid(row=3, column=0, padx=10, pady=10, sticky="nw")
+        response_text = scrolledtext.ScrolledText(frame, height=12, bg="#2d2d2d", 
+                                                 fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        response_text.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
+        
+        # Analysis
+        analysis_frame = ttk.LabelFrame(frame, text="Analysis", padding=10)
+        analysis_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        
+        analysis_text = scrolledtext.ScrolledText(analysis_frame, height=6, bg="#2d2d2d", 
+                                                 fg=ToolConfig.FG_COLOR, font=("Courier", 9))
+        analysis_text.pack(fill=tk.BOTH, expand=True)
+        
+        def analyze_request():
+            try:
+                method = method_var.get()
+                url = url_entry.get()
+                headers_str = headers_text.get(1.0, tk.END)
+                
+                try:
+                    headers = json.loads(headers_str)
+                except:
+                    headers = {}
+                
+                analysis = RequestInterceptor.analyze_request(method, url, headers, "")
+                
+                analysis_text.config(state=tk.NORMAL)
+                analysis_text.delete(1.0, tk.END)
+                
+                analysis_text.insert(tk.END, "=== REQUEST ANALYSIS ===\n\n")
+                analysis_text.insert(tk.END, f"Method: {method}\n")
+                analysis_text.insert(tk.END, f"URL: {url}\n\n")
+                
+                if analysis['url_vulnerabilities']:
+                    analysis_text.insert(tk.END, "⚠️  URL VULNERABILITIES:\n")
+                    for vuln in analysis['url_vulnerabilities']:
+                        analysis_text.insert(tk.END, f"  [{vuln['type']}] {vuln['severity']}: {vuln['match']}\n")
+                else:
+                    analysis_text.insert(tk.END, "✅ No URL vulnerabilities detected\n")
+                
+                analysis_text.config(state=tk.DISABLED)
+                self.logger.log("Request analyzed", "SUCCESS")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        def fetch_and_analyze():
+            try:
+                url = url_entry.get()
+                method = method_var.get()
+                
+                self.logger.log(f"Fetching {url}...", "INFO")
+                
+                response = requests.get(url, timeout=10)
+                
+                response_text.config(state=tk.NORMAL)
+                response_text.delete(1.0, tk.END)
+                
+                # Show response
+                response_text.insert(tk.END, f"Status: {response.status_code}\n")
+                response_text.insert(tk.END, f"Headers:\n{json.dumps(dict(response.headers), indent=2)}\n\n")
+                response_text.insert(tk.END, f"Body ({len(response.text)} bytes):\n")
+                response_text.insert(tk.END, response.text[:1000])
+                
+                response_text.config(state=tk.DISABLED)
+                
+                # Analyze response
+                analysis_text.config(state=tk.NORMAL)
+                analysis_text.delete(1.0, tk.END)
+                
+                analysis_text.insert(tk.END, "=== RESPONSE ANALYSIS ===\n\n")
+                analysis_text.insert(tk.END, f"Status Code: {response.status_code}\n")
+                
+                # Check security headers
+                headers_analysis = RequestInterceptor.check_security_headers(dict(response.headers))
+                
+                if headers_analysis['present']:
+                    analysis_text.insert(tk.END, "\n✅ Security Headers Present:\n")
+                    for h in headers_analysis['present']:
+                        analysis_text.insert(tk.END, f"  {h}\n")
+                
+                if headers_analysis['missing']:
+                    analysis_text.insert(tk.END, "\n⚠️  Missing Security Headers:\n")
+                    for h in headers_analysis['missing']:
+                        analysis_text.insert(tk.END, f"  {h}\n")
+                
+                # Extract scripts
+                scripts = RequestInterceptor.extract_scripts(response.text)
+                if scripts:
+                    analysis_text.insert(tk.END, f"\n📜 Found {len(scripts)} Scripts:\n")
+                    for script in scripts[:10]:
+                        if script['type'] == 'external':
+                            analysis_text.insert(tk.END, f"  [External] {script['src']}\n")
+                        else:
+                            analysis_text.insert(tk.END, f"  [Inline] {script['content'][:50]}...\n")
+                
+                analysis_text.config(state=tk.DISABLED)
+                self.logger.log(f"Response analyzed. Status: {response.status_code}", "SUCCESS")
+            
+            except Exception as e:
+                self.logger.log(str(e), "ERROR")
+        
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="🔍 Analyze Request", command=analyze_request).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="🌐 Fetch & Analyze", command=fetch_and_analyze).pack(side=tk.LEFT, padx=5)
+        
+        frame.columnconfigure(1, weight=1)
 
 
 if __name__ == "__main__":
